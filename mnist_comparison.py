@@ -3,212 +3,20 @@ import time
 from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import roc_auc_score, accuracy_score
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from neural_net_two_layers import NeuralNetMLP_TwoHidden, sigmoid, int_to_onehot
 import matplotlib.pyplot as plt
 
 
-class NeuralNetMLP_OneHidden:
-    def __init__(self, num_features, num_hidden, num_classes, random_seed=123):
-        super().__init__()
-        self.num_classes = num_classes
-        rng = np.random.RandomState(random_seed)
-        
-        self.weight_h = rng.normal(
-            loc=0.0, scale=0.1, size=(num_hidden, num_features))
-        self.bias_h = np.zeros(num_hidden)
-        
-        self.weight_out = rng.normal(
-            loc=0.0, scale=0.1, size=(num_classes, num_hidden))
-        self.bias_out = np.zeros(num_classes)
-
-    def forward(self, x):
-        z_h = np.dot(x, self.weight_h.T) + self.bias_h
-        a_h = sigmoid(z_h)
-        z_out = np.dot(a_h, self.weight_out.T) + self.bias_out
-        a_out = sigmoid(z_out)
-        return a_h, a_out
-
-    def backward(self, x, a_h, a_out, y):
-        y_onehot = int_to_onehot(y, self.num_classes)
-        
-        d_loss__d_a_out = 2.*(a_out - y_onehot) / y.shape[0]
-        d_a_out__d_z_out = a_out * (1. - a_out)
-        delta_out = d_loss__d_a_out * d_a_out__d_z_out
-        
-        d_z_out__dw_out = a_h
-        d_loss__dw_out = np.dot(delta_out.T, d_z_out__dw_out)
-        d_loss__db_out = np.sum(delta_out, axis=0)
-        
-        d_z_out__a_h = self.weight_out
-        d_loss__a_h = np.dot(delta_out, d_z_out__a_h)
-        d_a_h__d_z_h = a_h * (1. - a_h)
-        d_z_h__d_w_h = x
-        
-        d_loss__d_w_h = np.dot((d_loss__a_h * d_a_h__d_z_h).T, d_z_h__d_w_h)
-        d_loss__d_b_h = np.sum((d_loss__a_h * d_a_h__d_z_h), axis=0)
-        
-        return (d_loss__dw_out, d_loss__db_out,
-                d_loss__d_w_h, d_loss__d_b_h)
+from neural_net_one_layer import NeuralNetMLP_OneHidden, train_one_hidden
+from neural_net_two_layers import NeuralNetMLP_TwoHidden, train_two_hidden
+from pytorch_nn import PyTorchNN, train_pytorch
+from utils import calculate_macro_auc
 
 
-class PyTorchNN(nn.Module):
-    def __init__(self, num_features, num_hidden1, num_hidden2, num_classes):
-        super(PyTorchNN, self).__init__()
-        
-        self.fc1 = nn.Linear(num_features, num_hidden1)
-        self.fc2 = nn.Linear(num_hidden1, num_hidden2)
-        self.fc3 = nn.Linear(num_hidden2, num_classes)
-        self.sigmoid = nn.Sigmoid()
-        
-    def forward(self, x):
-        x = self.sigmoid(self.fc1(x))
-        x = self.sigmoid(self.fc2(x))
-        x = self.sigmoid(self.fc3(x))
-        return x
-
-
-def train_one_hidden(model, x_train, y_train, x_test, y_test, num_epochs, learning_rate):
-    train_losses = []
-    train_accs = []
-    test_accs = []
-    
-    for e in range(num_epochs):
-        a_h, a_out = model.forward(x_train)
-        
-        (d_loss__dw_out, d_loss__db_out,
-         d_loss__d_w_h, d_loss__d_b_h) = model.backward(
-            x_train, a_h, a_out, y_train)
-        
-        model.weight_out -= learning_rate * d_loss__dw_out
-        model.bias_out -= learning_rate * d_loss__db_out
-        model.weight_h -= learning_rate * d_loss__d_w_h
-        model.bias_h -= learning_rate * d_loss__d_b_h
-        
-        y_train_onehot = int_to_onehot(y_train, model.num_classes)
-        loss = np.mean((a_out - y_train_onehot)**2)
-        
-        y_train_pred = np.argmax(a_out, axis=1)
-        train_acc = np.sum(y_train == y_train_pred) / y_train.shape[0]
-        
-        _, a_out_test = model.forward(x_test)
-        y_test_pred = np.argmax(a_out_test, axis=1)
-        test_acc = np.sum(y_test == y_test_pred) / y_test.shape[0]
-        
-        train_losses.append(loss)
-        train_accs.append(train_acc)
-        test_accs.append(test_acc)
-        
-        if e % 10 == 0:
-            print(f'Epoch: {e:03d}/{num_epochs:03d} | Loss: {loss:.4f} | '
-                  f'Train Acc: {train_acc*100:.2f}% | Test Acc: {test_acc*100:.2f}%')
-    
-    return train_losses, train_accs, test_accs
-
-
-def train_two_hidden(model, x_train, y_train, x_test, y_test, num_epochs, learning_rate):
-    train_losses = []
-    train_accs = []
-    test_accs = []
-    
-    for e in range(num_epochs):
-        a_h1, a_h2, a_out = model.forward(x_train)
-        
-        (d_loss__dw_out, d_loss__db_out,
-         d_loss__d_w_h2, d_loss__d_b_h2,
-         d_loss__d_w_h1, d_loss__d_b_h1) = model.backward(
-            x_train, a_h1, a_h2, a_out, y_train)
-        
-        model.weight_out -= learning_rate * d_loss__dw_out
-        model.bias_out -= learning_rate * d_loss__db_out
-        model.weight_h2 -= learning_rate * d_loss__d_w_h2
-        model.bias_h2 -= learning_rate * d_loss__d_b_h2
-        model.weight_h1 -= learning_rate * d_loss__d_w_h1
-        model.bias_h1 -= learning_rate * d_loss__d_b_h1
-        
-        y_train_onehot = int_to_onehot(y_train, model.num_classes)
-        loss = np.mean((a_out - y_train_onehot)**2)
-        
-        y_train_pred = np.argmax(a_out, axis=1)
-        train_acc = np.sum(y_train == y_train_pred) / y_train.shape[0]
-        
-        _, _, a_out_test = model.forward(x_test)
-        y_test_pred = np.argmax(a_out_test, axis=1)
-        test_acc = np.sum(y_test == y_test_pred) / y_test.shape[0]
-        
-        train_losses.append(loss)
-        train_accs.append(train_acc)
-        test_accs.append(test_acc)
-        
-        if e % 10 == 0:
-            print(f'Epoch: {e:03d}/{num_epochs:03d} | Loss: {loss:.4f} | '
-                  f'Train Acc: {train_acc*100:.2f}% | Test Acc: {test_acc*100:.2f}%')
-    
-    return train_losses, train_accs, test_accs
-
-
-def train_pytorch(model, x_train, y_train, x_test, y_test, num_epochs, learning_rate):
-    x_train_torch = torch.FloatTensor(x_train)
-    y_train_torch = torch.LongTensor(y_train)
-    x_test_torch = torch.FloatTensor(x_test)
-    y_test_torch = torch.LongTensor(y_test)
-    
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-    
-    train_losses = []
-    train_accs = []
-    test_accs = []
-    
-    for e in range(num_epochs):
-        model.train()
-        optimizer.zero_grad()
-        outputs = model(x_train_torch)
-        loss = criterion(outputs, y_train_torch)
-        loss.backward()
-        optimizer.step()
-        
-        model.eval()
-        with torch.no_grad():
-            train_pred = torch.argmax(outputs, dim=1)
-            train_acc = (train_pred == y_train_torch).float().mean().item()
-            
-            test_outputs = model(x_test_torch)
-            test_pred = torch.argmax(test_outputs, dim=1)
-            test_acc = (test_pred == y_test_torch).float().mean().item()
-        
-        train_losses.append(loss.item())
-        train_accs.append(train_acc)
-        test_accs.append(test_acc)
-        
-        if e % 10 == 0:
-            print(f'Epoch: {e:03d}/{num_epochs:03d} | Loss: {loss.item():.4f} | '
-                  f'Train Acc: {train_acc*100:.2f}% | Test Acc: {test_acc*100:.2f}%')
-    
-    return train_losses, train_accs, test_accs
-
-
-def calculate_macro_auc(model, x, y, num_classes, model_type='numpy'):
-    if model_type == 'numpy_one':
-        _, a_out = model.forward(x)
-        probabilities = a_out
-    elif model_type == 'numpy_two':
-        _, _, a_out = model.forward(x)
-        probabilities = a_out
-    elif model_type == 'pytorch':
-        model.eval()
-        with torch.no_grad():
-            x_torch = torch.FloatTensor(x)
-            outputs = model(x_torch)
-            probabilities = outputs.numpy()
-    
-    y_onehot = int_to_onehot(y, num_classes)
-    macro_auc = roc_auc_score(y_onehot, probabilities, average='macro', multi_class='ovr')
-    
-    return macro_auc
+RANDOM_SEED = 123
+np.random.seed(RANDOM_SEED)
+torch.set_default_dtype(torch.float64)
+torch.manual_seed(RANDOM_SEED)
 
 
 def main():
@@ -224,7 +32,7 @@ def main():
     X = scaler.fit_transform(X)
     
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=123, stratify=y)
+        X, y, test_size=0.3, random_state=RANDOM_SEED, stratify=y)
     
     print(f"Training set size: {X_train.shape[0]}")
     print(f"Test set size: {X_test.shape[0]}")
@@ -232,20 +40,26 @@ def main():
     print(f"Number of classes: {len(np.unique(y))}")
     
     num_features = X_train.shape[1]
-    num_hidden1 = 128
-    num_hidden2 = 64
+    numpy_hidden = 50
+    torch_hidden = 500
     num_classes = 10
-    num_epochs = 50
-    learning_rate = 0.1
+    num_epochs_numpy = 20
+    num_epochs_pytorch = 50
+    learning_rate_numpy = 0.1
+    learning_rate_pytorch = 0.1
+    batch_size = 100
     
     print("\n" + "=" * 80)
     print("Architecture Configuration:")
     print(f"  Input features: {num_features}")
-    print(f"  Hidden layer 1: {num_hidden1} neurons")
-    print(f"  Hidden layer 2: {num_hidden2} neurons")
+    print(f"  Hidden layers for NumPy: {numpy_hidden} neurons")
+    print(f"  Hidden layers for PyTorch: {torch_hidden} neurons")
     print(f"  Output classes: {num_classes}")
-    print(f"  Learning rate: {learning_rate}")
-    print(f"  Epochs: {num_epochs}")
+    print(f"  NumPy Learning rate: {learning_rate_numpy}")
+    print(f"  PyTorch Learning rate: {learning_rate_pytorch}")
+    print(f"  NumPy Epochs: {num_epochs_numpy}")
+    print(f"  Batch size: {batch_size}")
+    print(f"  PyTorch Epochs: {num_epochs_pytorch}")
     print("=" * 80)
     
     results = {}
@@ -257,13 +71,14 @@ def main():
     start_time = time.time()
     model_one = NeuralNetMLP_OneHidden(
         num_features=num_features,
-        num_hidden=num_hidden1,
+        num_hidden=numpy_hidden,
         num_classes=num_classes,
-        random_seed=123
+        random_seed=RANDOM_SEED
     )
     
     losses_one, train_accs_one, test_accs_one = train_one_hidden(
-        model_one, X_train, y_train, X_test, y_test, num_epochs, learning_rate)
+        model_one, X_train, y_train, X_test, y_test, num_epochs_numpy, 
+        learning_rate_numpy, batch_size)
     
     macro_auc_one = calculate_macro_auc(model_one, X_test, y_test, num_classes, 'numpy_one')
     time_one = time.time() - start_time
@@ -289,14 +104,15 @@ def main():
     start_time = time.time()
     model_two = NeuralNetMLP_TwoHidden(
         num_features=num_features,
-        num_hidden1=num_hidden1,
-        num_hidden2=num_hidden2,
+        num_hidden1=numpy_hidden,
+        num_hidden2=numpy_hidden,
         num_classes=num_classes,
-        random_seed=123
+        random_seed=RANDOM_SEED
     )
     
     losses_two, train_accs_two, test_accs_two = train_two_hidden(
-        model_two, X_train, y_train, X_test, y_test, num_epochs, learning_rate)
+        model_two, X_train, y_train, X_test, y_test, num_epochs_numpy, 
+        learning_rate_numpy, batch_size)
     
     macro_auc_two = calculate_macro_auc(model_two, X_test, y_test, num_classes, 'numpy_two')
     time_two = time.time() - start_time
@@ -322,13 +138,14 @@ def main():
     start_time = time.time()
     model_pytorch = PyTorchNN(
         num_features=num_features,
-        num_hidden1=num_hidden1,
-        num_hidden2=num_hidden2,
+        num_hidden1=torch_hidden,
+        num_hidden2=torch_hidden,
         num_classes=num_classes
     )
     
     losses_pytorch, train_accs_pytorch, test_accs_pytorch = train_pytorch(
-        model_pytorch, X_train, y_train, X_test, y_test, num_epochs, learning_rate)
+        model_pytorch, X_train, y_train, X_test, y_test, num_epochs_pytorch, 
+        learning_rate_pytorch, batch_size)
     
     macro_auc_pytorch = calculate_macro_auc(model_pytorch, X_test, y_test, num_classes, 'pytorch')
     time_pytorch = time.time() - start_time
@@ -347,22 +164,7 @@ def main():
         'test_accs': test_accs_pytorch
     }
     
-    print("\n" + "=" * 80)
-    print("COMPARISON SUMMARY")
-    print("=" * 80)
-    print(f"\n{'Model':<30} {'Test Accuracy':<15} {'Macro AUC':<15} {'Time (s)':<10}")
-    print("-" * 80)
-    print(f"{'1. Single Hidden Layer':<30} {results['one_hidden']['accuracy']*100:>12.2f}%  "
-          f"{results['one_hidden']['macro_auc']:>12.4f}  {results['one_hidden']['time']:>8.2f}")
-    print(f"{'2. Two Hidden Layers':<30} {results['two_hidden']['accuracy']*100:>12.2f}%  "
-          f"{results['two_hidden']['macro_auc']:>12.4f}  {results['two_hidden']['time']:>8.2f}")
-    print(f"{'3. PyTorch (Two Hidden)':<30} {results['pytorch']['accuracy']*100:>12.2f}%  "
-          f"{results['pytorch']['macro_auc']:>12.4f}  {results['pytorch']['time']:>8.2f}")
-    print("-" * 80)
-    
-    print("\nPerformance Improvements:")
-    auc_improvement = (results['two_hidden']['macro_auc'] - results['one_hidden']['macro_auc']) / results['one_hidden']['macro_auc'] * 100
-    print(f"  Two hidden layers vs Single: {auc_improvement:+.2f}% AUC improvement")
+    print_comparison_summary(results)
     
     print("\nGenerating performance plots...")
     create_plots(results)
@@ -379,6 +181,31 @@ def main():
     print("=" * 80)
 
 
+def print_comparison_summary(results):
+    print("\n" + "=" * 80)
+    print("COMPARISON SUMMARY")
+    print("=" * 80)
+    print(f"\n{'Model':<30} {'Test Accuracy':<15} {'Macro AUC':<15} {'Time (s)':<10}")
+    print("-" * 80)
+    print(f"{'1. Single Hidden Layer':<30} {results['one_hidden']['accuracy']*100:>12.2f}%  "
+          f"{results['one_hidden']['macro_auc']:>12.4f}  {results['one_hidden']['time']:>8.2f}")
+    print(f"{'2. Two Hidden Layers':<30} {results['two_hidden']['accuracy']*100:>12.2f}%  "
+          f"{results['two_hidden']['macro_auc']:>12.4f}  {results['two_hidden']['time']:>8.2f}")
+    print(f"{'3. PyTorch (Two Hidden)':<30} {results['pytorch']['accuracy']*100:>12.2f}%  "
+          f"{results['pytorch']['macro_auc']:>12.4f}  {results['pytorch']['time']:>8.2f}")
+    print("-" * 80)
+    
+    print("\nPerformance Analysis:")
+    auc_improvement = (results['two_hidden']['macro_auc'] - results['one_hidden']['macro_auc']) / results['one_hidden']['macro_auc'] * 100
+    print(f"  Two hidden layers vs Single: {auc_improvement:+.2f}% AUC change")
+    
+    best_model = max(results.keys(), key=lambda k: results[k]['macro_auc'])
+    best_name = {'one_hidden': 'Single Hidden Layer', 
+                 'two_hidden': 'Two Hidden Layers', 
+                 'pytorch': 'PyTorch'}[best_model]
+    print(f"  Best performing model: {best_name} (AUC: {results[best_model]['macro_auc']:.4f})")
+    
+
 def create_plots(results):
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
@@ -388,7 +215,7 @@ def create_plots(results):
     ax.plot(results['pytorch']['losses'], label='PyTorch', linewidth=2)
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Loss')
-    ax.set_title('Training Loss Comparison')
+    ax.set_title('Training Loss Comparison', pad=10)
     ax.legend()
     ax.grid(True, alpha=0.3)
     
@@ -398,7 +225,7 @@ def create_plots(results):
     ax.plot(results['pytorch']['test_accs'], label='PyTorch', linewidth=2)
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Accuracy')
-    ax.set_title('Test Accuracy Comparison')
+    ax.set_title('Test Accuracy Comparison', pad=10)
     ax.legend()
     ax.grid(True, alpha=0.3)
     
@@ -411,8 +238,8 @@ def create_plots(results):
     ]
     bars = ax.bar(models, accuracies, color=['#1f77b4', '#ff7f0e', '#2ca02c'])
     ax.set_ylabel('Test Accuracy (%)')
-    ax.set_title('Final Test Accuracy')
-    ax.set_ylim([min(accuracies)-5, max(accuracies)+5])
+    ax.set_title('Final Test Accuracy', pad=10)
+    ax.set_ylim([0, 100])
     
     for bar in bars:
         height = bar.get_height()
@@ -428,8 +255,8 @@ def create_plots(results):
     ]
     bars = ax.bar(models, aucs, color=['#1f77b4', '#ff7f0e', '#2ca02c'])
     ax.set_ylabel('Macro AUC')
-    ax.set_title('Final Macro AUC Score')
-    ax.set_ylim([min(aucs)-0.05, max(aucs)+0.05])
+    ax.set_title('Final Macro AUC Score', pad=10)
+    ax.set_ylim([0, 1])
     
     for bar in bars:
         height = bar.get_height()

@@ -1,19 +1,15 @@
 import numpy as np
 
-
-def sigmoid(z):
-    return 1. / (1. + np.exp(-z))
-
-
-def int_to_onehot(y, num_labels):
-    ary = np.zeros((y.shape[0], num_labels))
-    for i, val in enumerate(y):
-        ary[i, val] = 1
-    return ary
+from utils import minibatch_generator, sigmoid, int_to_onehot, RANDOM_SEED
 
 
 class NeuralNetMLP_TwoHidden:
-    def __init__(self, num_features, num_hidden1, num_hidden2, num_classes, random_seed=123):
+    """
+    Implements a two hidden layer neural network using NumPy
+    The hidden layers have Sigmoid as the activation function, and the
+    output layer has Softmax
+    """
+    def __init__(self, num_features, num_hidden1, num_hidden2, num_classes, random_seed=RANDOM_SEED):
         super().__init__()
         
         self.num_classes = num_classes
@@ -75,50 +71,44 @@ class NeuralNetMLP_TwoHidden:
                 d_loss__d_w_h1, d_loss__d_b_h1)
 
 
-def train(model, x_train, y_train, x_valid, y_valid, num_epochs, learning_rate):
-    epoch_loss = []
-    epoch_train_acc = []
-    epoch_valid_acc = []
+def train_two_hidden(model, X_train, y_train, X_test, y_test, num_epochs, learning_rate, batch_size):
+    train_losses = []
+    train_accs = []
+    test_accs = []
     
     for e in range(num_epochs):
-        a_h1, a_h2, a_out = model.forward(x_train)
+        for X_train_mini, y_train_mini in minibatch_generator(X_train, y_train, batch_size):
+            a_h1, a_h2, a_out = model.forward(X_train_mini)
         
-        (d_loss__dw_out, d_loss__db_out,
-         d_loss__d_w_h2, d_loss__d_b_h2,
-         d_loss__d_w_h1, d_loss__d_b_h1) = model.backward(
-            x_train, a_h1, a_h2, a_out, y_train)
-        
-        model.weight_out -= learning_rate * d_loss__dw_out
-        model.bias_out -= learning_rate * d_loss__db_out
-        model.weight_h2 -= learning_rate * d_loss__d_w_h2
-        model.bias_h2 -= learning_rate * d_loss__d_b_h2
-        model.weight_h1 -= learning_rate * d_loss__d_w_h1
-        model.bias_h1 -= learning_rate * d_loss__d_b_h1
-        
+            (d_loss__dw_out, d_loss__db_out,
+            d_loss__d_w_h2, d_loss__d_b_h2,
+            d_loss__d_w_h1, d_loss__d_b_h1) = model.backward(
+                X_train_mini, a_h1, a_h2, a_out, y_train_mini)
+            
+            model.weight_out -= learning_rate * d_loss__dw_out
+            model.bias_out -= learning_rate * d_loss__db_out
+            model.weight_h2 -= learning_rate * d_loss__d_w_h2
+            model.bias_h2 -= learning_rate * d_loss__d_b_h2
+            model.weight_h1 -= learning_rate * d_loss__d_w_h1
+            model.bias_h1 -= learning_rate * d_loss__d_b_h1
+            
+        _, _, a_out = model.forward(X_train)
         y_train_onehot = int_to_onehot(y_train, model.num_classes)
         loss = np.mean((a_out - y_train_onehot)**2)
         
         y_train_pred = np.argmax(a_out, axis=1)
         train_acc = np.sum(y_train == y_train_pred) / y_train.shape[0]
         
-        _, _, a_out_valid = model.forward(x_valid)
-        y_valid_pred = np.argmax(a_out_valid, axis=1)
-        valid_acc = np.sum(y_valid == y_valid_pred) / y_valid.shape[0]
+        _, _, a_out_test = model.forward(X_test)
+        y_test_pred = np.argmax(a_out_test, axis=1)
+        test_acc = np.sum(y_test == y_test_pred) / y_test.shape[0]
         
-        epoch_loss.append(loss)
-        epoch_train_acc.append(train_acc)
-        epoch_valid_acc.append(valid_acc)
+        train_losses.append(loss)
+        train_accs.append(train_acc)
+        test_accs.append(test_acc)
         
-        if e % 10 == 0:
-            print(f'Epoch: {e:03d}/{num_epochs:03d} | '
-                  f'Loss: {loss:.4f} | '
-                  f'Train Acc: {train_acc*100:.2f}% | '
-                  f'Valid Acc: {valid_acc*100:.2f}%')
+        if e % 5 == 0:
+            print(f'Epoch: {e:03d}/{num_epochs:03d} | Loss: {loss:.4f} | '
+                  f'Train Acc: {train_acc*100:.2f}% | Test Acc: {test_acc*100:.2f}%')
     
-    return epoch_loss, epoch_train_acc, epoch_valid_acc
-
-
-def predict(model, x):
-    _, _, a_out = model.forward(x)
-    predictions = np.argmax(a_out, axis=1)
-    return predictions, a_out
+    return train_losses, train_accs, test_accs
