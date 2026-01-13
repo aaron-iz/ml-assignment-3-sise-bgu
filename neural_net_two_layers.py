@@ -6,8 +6,7 @@ from utils import minibatch_generator, sigmoid, int_to_onehot, RANDOM_SEED
 class NeuralNetMLP_TwoHidden:
     """
     Implements a two hidden layer neural network using NumPy
-    The hidden layers have Sigmoid as the activation function, and the
-    output layer has Softmax
+    The hidden layers and output layer have Sigmoid as the activation function
     """
     def __init__(self, num_features, num_hidden1, num_hidden2, num_classes, random_seed=RANDOM_SEED):
         super().__init__()

@@ -7,7 +7,7 @@ from utils import minibatch_generator
 class PyTorchNN(nn.Module):
     """
     Implements a two hidden layer neural network using PyTorch
-    Each layer has an activation function of Sigmoid
+    The hidden layers have Sigmoid activation functions and the output has Softmax
     """
     def __init__(self, num_features, num_hidden1, num_hidden2, num_classes):
         super(PyTorchNN, self).__init__()
